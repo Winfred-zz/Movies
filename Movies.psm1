@@ -373,15 +373,22 @@ $MovieName,
 	[int]$MovieYear = $Null
 	if($MovieName -match "\([0-9][0-9][0-9][0-9]\)")
 	{
-		$MovieYear = $MovieName.split("(")[1].Replace(")","")
-		$MovieName = $MovieName.split("(")[0].Trim()
+		$MovieYear = $Matches[0].Trim("()")
+		$MovieName = $MovieName.Substring(0,$MovieName.LastIndexOf($Matches[0])).Trim()
 		$MovieYears = (($MovieYear + 1),$MovieYear,($MovieYear -1))
 	}
 	$TheMovieDBMatch = $Null
 	Add-Type -AssemblyName System.Web
 	$URLMovieName = [System.Web.HttpUtility]::UrlEncode($MovieName)
 	$SearchResult = $Null
-	$SearchResult = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/movie?api_key=$($TheMovieDBapikey)&query=$URLMovieName"
+	try
+	{
+		$SearchResult = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/movie?api_key=$($TheMovieDBapikey)&query=$URLMovieName"
+	}
+	catch
+	{
+		write-warning "Get-MovieClassification: TheMovieDB search failed for '$MovieName': $($_.Exception.Message)"
+	}
 	$DutchLanguage = $Null
 
 	if($SearchResult)
@@ -712,16 +719,16 @@ param(
 $Folder
 )
 	$DutchFolders = get-childitem $Folder | Where-Object {$_.name -match "  "}
-	foreach($Folder in $DutchFolders)
+	foreach($SubFolder in $DutchFolders)
 	{
-		Rename-Item -Path $Folder.fullname -NewName $Folder.fullname.Replace("  "," ")
+		Rename-Item -Path $SubFolder.fullname -NewName $SubFolder.fullname.Replace("  "," ")
 	}
 	if($Folder -match "Dutch")
 	{
 		$DutchFolders = get-childitem $Folder | Where-Object {$_.name -match "- Dutch "}
-		foreach($Folder in $DutchFolders)
+		foreach($SubFolder in $DutchFolders)
 		{
-			Rename-Item -Path $Folder.fullname -NewName $Folder.fullname.Replace("- Dutch","")
+			Rename-Item -Path $SubFolder.fullname -NewName $SubFolder.fullname.Replace("- Dutch","")
 		}
 	}
 	
@@ -830,19 +837,19 @@ $Folder,
 		}
 		start-sleep -Milliseconds 500
 	}
-	if(Join-Path $Drive Anime)
+	if(Test-Path (Join-Path $Drive Anime))
 	{
 		Rename-TVSeasons -Folder (Join-Path $Drive Anime)
 	}
-	if(Join-Path $Drive TV)
+	if(Test-Path (Join-Path $Drive TV))
 	{
 		Rename-TVSeasons -Folder (Join-Path $Drive TV)
 	}
-	if(Join-Path $Drive Documentaries)
+	if(Test-Path (Join-Path $Drive Documentaries))
 	{
 		Rename-TVSeasons -Folder (Join-Path $Drive Documentaries)
 	}
-	if(Join-Path $Drive Dutch)
+	if(Test-Path (Join-Path $Drive Dutch))
 	{
 		Rename-TVSeasons -Folder (Join-Path $Drive Dutch)
 	}
@@ -894,8 +901,10 @@ $Quality=22,
 	}elseif($env:computername -eq "candace"){
 		$driveletter = "H:\"
 		$ToBeRemovedFolder = Join-path "Z:\ToBeRemoved2" $Folder.Name
+	}else{
+		throw "ConvertTo-x265: unsupported computer '$($env:computername)' - add a driveletter/ToBeRemovedFolder mapping for it."
 	}
-	
+
 	
 	$ConversionToFolder = Join-path ($driveletter + "Handbrake\ConversionTo") $Folder.Name
 	$ConversionFromFolder = Join-path ($driveletter + "Handbrake\ConversionFrom") $Folder.Name
@@ -911,6 +920,12 @@ $Quality=22,
 		$OldFileName = Join-path $ConversionFromFolder $File.Name
 		$NewFileName = Join-path $ConversionToFolder $File.Name
 		Convert-HandbrakeCommandx265  -From "$OldFileName" -To "$NewFileName" -Quality $Quality -To1080 $To1080
+		if(!(test-path $NewFileName))
+		{
+			write-host "HandBrakeCLI did not produce $NewFileName, leaving original in place." -fore red
+			move-item $OldFileName $Folder.FullName
+			return
+		}
 		if((get-item $NewFileName).length -lt ((get-item $OldFileName).length - ((get-item $OldFileName).length/20)))
 		{
 			write-host "NewFileName size: $((get-item $NewFileName).length) - OldFileName $((get-item $OldFileName).length)" -fore green
@@ -968,6 +983,12 @@ $Quality=22,
 				{
 					write-host "$NewFileName doesn't exist"
 					Convert-HandbrakeCommandx265  -From "$OldFileName" -To "$NewFileName" -Quality $Quality -To1080 $To1080
+					if(!(test-path $NewFileName))
+					{
+						write-host "HandBrakeCLI did not produce $NewFileName, leaving original in place." -fore red
+						move-item $OldFileName $SubFolder.FullName
+						continue
+					}
 					if((get-item $NewFileName).length -lt ((get-item $OldFileName).length - ((get-item $OldFileName).length/20)))
 					{
 						write-host "NewFileName size: $((get-item $NewFileName).length) - OldFileName $((get-item $OldFileName).length)" -fore green
@@ -1072,7 +1093,7 @@ param($Directory)
 
 	Set-Location $Directory
 
-	$Files = get-childitem $Directory
+	$Files = get-childitem $Directory -File | Sort-Object {[regex]::Replace($_.Name,'\d+',{$args[0].Value.PadLeft(20,'0')})}
 
 	if ($files  -is [array])
 	{
